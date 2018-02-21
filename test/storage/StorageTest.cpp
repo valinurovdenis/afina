@@ -98,7 +98,7 @@ TEST(StorageTest, MaxTest) {
         ss.str("");
         storage.Put(key, val);
     }
-    
+
     for(long i=100; i<1100; ++i)
     {
         ss << "Key" << i;
@@ -113,7 +113,7 @@ TEST(StorageTest, MaxTest) {
 
         EXPECT_TRUE(val == res);
     }
-    
+
     for(long i=0; i<100; ++i)
     {
         ss << "Key" << i;

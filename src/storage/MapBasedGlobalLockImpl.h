@@ -1,9 +1,10 @@
 #ifndef AFINA_STORAGE_MAP_BASED_GLOBAL_LOCK_IMPL_H
 #define AFINA_STORAGE_MAP_BASED_GLOBAL_LOCK_IMPL_H
 
-#include <map>
+#include <unordered_map>
 #include <mutex>
 #include <string>
+#include <functional>
 
 #include <afina/Storage.h>
 
@@ -15,6 +16,56 @@ namespace Backend {
  *
  *
  */
+using val_type = std::string;
+
+struct Entry {
+    Entry(const std::string *key, const val_type& value): _prev(nullptr), _next(nullptr), _key(key), _value(value){}
+
+    const std::string *_key;
+    val_type _value;
+    Entry *_prev, *_next;
+};
+
+class DoubleLinked {
+public:
+    DoubleLinked(): _tail(nullptr), _head(nullptr){}
+
+    Entry* add_front(const std::string *key, const val_type& value){
+        if (_head == nullptr){
+            _head = _tail = new Entry(key, value);
+        } else {
+            Entry *temp = new Entry(key, value);
+            _head->_next = temp;
+            temp->_prev = _head;
+            _head = temp;
+        }
+        return _head;
+    }
+
+    std::string del(Entry* ptr){
+        if (ptr == _head)
+            _head = ptr->_prev;
+        if (ptr == _tail)
+            _tail = ptr->_next;
+
+        if (ptr->_next != nullptr)
+            ptr->_next->_prev = ptr->_prev;
+        if (ptr->_prev != nullptr)
+            ptr->_prev->_next = ptr->_next;
+        std::string ret = *(ptr->_key);
+        delete ptr;
+
+        return ret;
+    }
+
+    std::string pop_back(){
+        return del(_tail);
+    }
+
+private:
+    Entry *_tail, *_head;
+};
+
 class MapBasedGlobalLockImpl : public Afina::Storage {
 public:
     MapBasedGlobalLockImpl(size_t max_size = 1024) : _max_size(max_size) {}
@@ -36,8 +87,10 @@ public:
     bool Get(const std::string &key, std::string &value) const override;
 
 private:
+    mutable std::mutex _lock;
     size_t _max_size;
-    std::map<std::string, std::string> _backend;
+    mutable std::unordered_map<std::string, Entry*> _backend;
+    mutable DoubleLinked _list;
 };
 
 } // namespace Backend
