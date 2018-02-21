@@ -14,6 +14,7 @@ bool MapBasedGlobalLockImpl::Put(const std::string &key, const std::string &valu
     else if (_backend.size() == _max_size)
         _backend.erase(_list.pop_back());
 
+    _backend[key];
     _backend[key] = _list.add_front(&(_backend.find(key)->first), value);
     return true;
 }
@@ -28,6 +29,7 @@ bool MapBasedGlobalLockImpl::PutIfAbsent(const std::string &key, const std::stri
     if (_backend.size() == _max_size)
             _backend.erase(_list.pop_back());
 
+    _backend[key];
     _backend[key] = _list.add_front(&(_backend.find(key)->first), value);
 
     return true;
