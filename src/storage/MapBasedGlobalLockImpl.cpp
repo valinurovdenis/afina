@@ -11,11 +11,12 @@ bool MapBasedGlobalLockImpl::Put(const std::string &key, const std::string &valu
 
     if (_backend.find(key) != _backend.end())
         _list.del(_backend[key]);
-    else if (_backend.size() == _max_size)
+    else if (_backend.size() == _max_size){
         _backend.erase(_list.pop_back());
+        _backend[key]; // in order to create element with key
+    }
 
-    _backend[key];
-    _backend[key] = _list.add_front(&(_backend.find(key)->first), value);
+    _backend[key] = _list.add_front(&(_backend.find(key)->first), value); // by standard references to keys in unordered_map doesn't invalidate even if rehashing occurs
     return true;
 }
 

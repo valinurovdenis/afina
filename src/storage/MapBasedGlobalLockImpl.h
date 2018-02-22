@@ -30,11 +30,11 @@ class DoubleLinked {
 public:
     DoubleLinked(): _tail(nullptr), _head(nullptr){}
 
-    Entry* add_front(const std::string *key, const val_type& value){
+    Entry* add_front(const std::string* key, const val_type& value){
         if (_head == nullptr){
             _head = _tail = new Entry(key, value);
         } else {
-            Entry *temp = new Entry(key, value);
+            Entry* temp = new Entry(key, value);
             _head->_next = temp;
             temp->_prev = _head;
             _head = temp;
