@@ -51,7 +51,7 @@ TEST(StorageTest, PutIfAbsent) {
 }
 
 TEST(StorageTest, BigTest) {
-    MapBasedGlobalLockImpl storage(100000);
+    MapBasedGlobalLockImpl storage(2366662);
 
     std::stringstream ss;
 
@@ -84,7 +84,7 @@ TEST(StorageTest, BigTest) {
 }
 
 TEST(StorageTest, MaxTest) {
-    MapBasedGlobalLockImpl storage(1000);
+    MapBasedGlobalLockImpl storage(12200);
 
     std::stringstream ss;
 

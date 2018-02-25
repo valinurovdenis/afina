@@ -16,13 +16,12 @@ namespace Backend {
  *
  *
  */
-using val_type = std::string;
 
 struct Entry {
-    Entry(const std::string *key, const val_type& value): _prev(nullptr), _next(nullptr), _key(key), _value(value){}
+    Entry(const std::string &key, const std::string &value): _prev(nullptr), _next(nullptr), _key(key), _value(value){}
 
-    const std::string *_key;
-    val_type _value;
+    const std::string &_key;
+    std::string _value;
     Entry *_prev, *_next;
 };
 
@@ -30,7 +29,7 @@ class DoubleLinked {
 public:
     DoubleLinked(): _tail(nullptr), _head(nullptr){}
 
-    Entry* add_front(const std::string* key, const val_type& value){
+    Entry* add_front(const std::string &key, const std::string &value){
         if (_head == nullptr){
             _head = _tail = new Entry(key, value);
         } else {
@@ -52,7 +51,7 @@ public:
             ptr->_next->_prev = ptr->_prev;
         if (ptr->_prev != nullptr)
             ptr->_prev->_next = ptr->_next;
-        std::string ret = *(ptr->_key);
+        std::string ret = ptr->_key;
         delete ptr;
 
         return ret;
@@ -62,13 +61,17 @@ public:
         return del(_tail);
     }
 
+    std::string get_back(){
+        return _tail->_key;
+    }
+
 private:
     Entry *_tail, *_head;
 };
 
 class MapBasedGlobalLockImpl : public Afina::Storage {
 public:
-    MapBasedGlobalLockImpl(size_t max_size = 1024) : _max_size(max_size) {}
+    MapBasedGlobalLockImpl(size_t max_size = 1024) : _max_size(max_size), _current_size(0) {}
     ~MapBasedGlobalLockImpl() {}
 
     // Implements Afina::Storage interface
@@ -87,8 +90,11 @@ public:
     bool Get(const std::string &key, std::string &value) const override;
 
 private:
-    mutable std::mutex _lock;
+    void SizeControl(size_t add_memory);
+
+    mutable std::recursive_mutex _lock;
     size_t _max_size;
+    size_t _current_size;
     mutable std::unordered_map<std::string, Entry*> _backend;
     mutable DoubleLinked _list;
 };
