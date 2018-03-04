@@ -213,7 +213,7 @@ void ServerImpl::RunConnection(int socket) {
     
     std::string in, out;
     const int buf_size = 4096;
-    in.reserve(buf_size);
+    in.resize(buf_size);
     char buf[buf_size];
     ssize_t count;
     size_t parsed, len = 0;
@@ -231,7 +231,7 @@ void ServerImpl::RunConnection(int socket) {
 
                 if ((count = read(socket, buf, buf_size)) >= 0){
                     if (len + count > in.capacity())
-                        in.reserve(len + count);
+                        in.resize(len + count);
 
                     std::memmove(&in[0] + len, buf, count);
                     len += count;
@@ -255,7 +255,7 @@ void ServerImpl::RunConnection(int socket) {
                 body_size += 2;
 
                 if (in.capacity() < body_size)
-                    in.reserve(body_size);
+                    in.resize(body_size);
 
                 while (len < body_size){
                     if ((count = read(socket, buf, std::min((size_t)buf_size, body_size - len))) >= 0){
