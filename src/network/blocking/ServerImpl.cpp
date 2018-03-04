@@ -19,6 +19,9 @@
 
 #include <afina/Storage.h>
 
+#include "../../protocol/Parser.h"
+#include <afina/execute/Command.h>
+
 namespace Afina {
 namespace Network {
 namespace Blocking {
@@ -27,6 +30,16 @@ void *ServerImpl::RunAcceptorProxy(void *p) {
     ServerImpl *srv = reinterpret_cast<ServerImpl *>(p);
     try {
         srv->RunAcceptor();
+    } catch (std::runtime_error &ex) {
+        std::cerr << "Server fails: " << ex.what() << std::endl;
+    }
+    return 0;
+}
+
+void *ServerImpl::RunConnectionProxy(void *p) {
+    std::pair<ServerImpl*, int> *srv = reinterpret_cast<std::pair<ServerImpl*, int> *>(p);
+    try {
+        srv->first->RunConnection(srv->second);
     } catch (std::runtime_error &ex) {
         std::cerr << "Server fails: " << ex.what() << std::endl;
     }
@@ -91,12 +104,17 @@ void ServerImpl::Start(uint32_t port, uint16_t n_workers) {
 void ServerImpl::Stop() {
     std::cout << "network debug: " << __PRETTY_FUNCTION__ << std::endl;
     running.store(false);
+    shutdown(server_socket, SHUT_RDWR);
 }
 
 // See Server.h
 void ServerImpl::Join() {
     std::cout << "network debug: " << __PRETTY_FUNCTION__ << std::endl;
     pthread_join(accept_thread, 0);
+
+    std::unique_lock<std::mutex> lock(connections_mutex);
+    while (connections.size() != 0)
+        connections_cv.wait(lock);
 }
 
 // See Server.h
@@ -123,7 +141,7 @@ void ServerImpl::RunAcceptor() {
     // - Family: IPv4
     // - Type: Full-duplex stream (reliable)
     // - Protocol: TCP
-    int server_socket = socket(PF_INET, SOCK_STREAM, IPPROTO_TCP);
+    server_socket = socket(PF_INET, SOCK_STREAM, IPPROTO_TCP);
     if (server_socket == -1) {
         throw std::runtime_error("Failed to open socket");
     }
@@ -170,15 +188,17 @@ void ServerImpl::RunAcceptor() {
             throw std::runtime_error("Socket accept() failed");
         }
 
-        // TODO: Start new thread and process data from/to connection
-        {
-            std::string msg = "TODO: start new thread and process memcached protocol instead";
-            if (send(client_socket, msg.data(), msg.size(), 0) <= 0) {
-                close(client_socket);
-                close(server_socket);
-                throw std::runtime_error("Socket send() failed");
-            }
+        std::lock_guard<std::mutex> lock(connections_mutex);
+        if (connections.size() == max_workers)
             close(client_socket);
+        else {
+            std::pair<ServerImpl*, int> temp = std::make_pair(this, client_socket);
+            pthread_t client_pthread;
+            if (pthread_create(&client_pthread, NULL, ServerImpl::RunConnectionProxy, &temp) < 0) {
+                throw std::runtime_error("Could not create server thread");
+            }
+            connections.insert(client_pthread);
+            pthread_detach(client_pthread);
         }
     }
 
@@ -187,11 +207,94 @@ void ServerImpl::RunAcceptor() {
 }
 
 // See Server.h
-void ServerImpl::RunConnection() {
+void ServerImpl::RunConnection(int socket) {
     std::cout << "network debug: " << __PRETTY_FUNCTION__ << std::endl;
-    // TODO: All connection work is here
+    Afina::Protocol::Parser parser;
+    
+    std::string in, out;
+    const int buf_size = 4096;
+    in.reserve(buf_size);
+    char buf[buf_size];
+    ssize_t count;
+    size_t parsed, len = 0;
+    bool error_catched = false;
+
+    while (running.load()){
+        try {
+            parsed = 0;
+
+            do {
+                if (parsed != 0){
+                    len -= parsed;
+                    std::memmove(&in[0], &in[0] + parsed, len);
+                }
+
+                if ((count = read(socket, buf, buf_size)) >= 0){
+                    if (len + count > in.capacity())
+                        in.reserve(len + count);
+
+                    std::memmove(&in[0] + len, buf, count);
+                    len += count;
+
+                    if (len == 0)
+                        EndConnection(socket);
+                } else
+                    throw std::runtime_error("Socket command read() failed");
+            } while (!parser.Parse(&in[0], len, parsed));
+
+            if (parsed != 0){
+                len -= parsed;
+                std::memmove(&in[0], &in[0] + parsed, len);
+            }
+
+            uint32_t body_size=0;
+            std::unique_ptr<Execute::Command> command = parser.Build(body_size);
+            parser.Reset();
+
+            if (body_size != 0){
+                body_size += 2;
+
+                if (in.capacity() < body_size)
+                    in.reserve(body_size);
+
+                while (len < body_size){
+                    if ((count = read(socket, buf, std::min((size_t)buf_size, body_size - len))) >= 0){
+                        std::memmove(&in[0] + len, buf, count);
+                        len += count;
+                    } else
+                        throw std::runtime_error("Socket arguments read() failed");
+                }
+            }
+
+            command->Execute(*pStorage, std::string(in.data(), (body_size > 2) ? body_size - 2 : 0), out);
+
+            if (body_size != 0){
+                len -= body_size;
+                std::memmove(&in[0], &in[0] + body_size, len);
+            }
+        } catch (std::exception& e){
+            out = std::string("SERVER_ERROR ") + e.what();
+            error_catched = true;
+        }
+        
+        if (out.size() > 0){
+            out += "\r\n";
+            if (send(socket, &out[0], out.size(), 0) < 0)
+                error_catched = true;
+        }
+        if (error_catched)
+            break;
+    }
+
+    EndConnection(socket);
 }
 
+void ServerImpl::EndConnection(int socket) {
+    close(socket);
+    std::unique_lock<std::mutex> lock(connections_mutex);
+    connections.erase(pthread_self());
+    connections_cv.notify_one();
+}
 } // namespace Blocking
 } // namespace Network
 } // namespace Afina
