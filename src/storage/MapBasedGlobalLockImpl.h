@@ -90,7 +90,7 @@ public:
     bool Get(const std::string &key, std::string &value) const override;
 
 private:
-    void SizeControl(size_t add_memory);
+    bool SizeControl(size_t add_memory);
 
     mutable std::recursive_mutex _lock;
     size_t _max_size;
