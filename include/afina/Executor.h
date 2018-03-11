@@ -8,6 +8,8 @@
 #include <queue>
 #include <string>
 #include <thread>
+#include <map>
+#include <functional>
 
 namespace Afina {
 
@@ -15,6 +17,7 @@ namespace Afina {
  * # Thread pool
  */
 class Executor {
+public:
     enum class State {
         // Threadpool is fully operational, tasks could be added and get executed
         kRun,
@@ -27,7 +30,7 @@ class Executor {
         kStopped
     };
 
-    Executor(std::string name, int size);
+    Executor(std::string name, size_t low_watermark, size_t hight_watermark, size_t max_queue_size, size_t idle_time);
     ~Executor();
 
     /**
@@ -49,13 +52,18 @@ class Executor {
         // Prepare "task"
         auto exec = std::bind(std::forward<F>(func), std::forward<Types>(args)...);
 
-        std::unique_lock<std::mutex> lock(this->mutex);
-        if (state != State::kRun) {
-            return false;
-        }
+        {
+            std::unique_lock<std::mutex> tasks_lock(this->tasks_mutex);
+            if (state != State::kRun) {
+                return false;
+            }
 
-        // Enqueue new task
-        tasks.push_back(exec);
+            std::unique_lock<std::mutex> working_lock(this->working_mutex);
+            if (working_thread_cnt == threads.size() && working_thread_cnt + 1 <= hight_watermark)
+                add_thread();
+            // Enqueue new task
+            tasks.push_back(exec);
+        }
         empty_condition.notify_one();
         return true;
     }
@@ -67,6 +75,8 @@ private:
     Executor &operator=(const Executor &); // = delete;
     Executor &operator=(Executor &&);      // = delete;
 
+    void add_thread();
+
     /**
      * Main function that all pool threads are running. It polls internal task queue and execute tasks
      */
@@ -75,7 +85,7 @@ private:
     /**
      * Mutex to protect state below from concurrent modification
      */
-    std::mutex mutex;
+    std::mutex working_mutex, tasks_mutex;
 
     /**
      * Conditional variable to await new data in case of empty queue
@@ -85,7 +95,8 @@ private:
     /**
      * Vector of actual threads that perorm execution
      */
-    std::vector<std::thread> threads;
+    std::vector<std::pair<std::thread, std::thread::id>> threads;
+    size_t working_thread_cnt = 0;
 
     /**
      * Task queue
@@ -96,7 +107,10 @@ private:
      * Flag to stop bg threads
      */
     State state;
+
+    size_t low_watermark, hight_watermark, max_queue_size, idle_time;
 };
+
 
 } // namespace Afina
 

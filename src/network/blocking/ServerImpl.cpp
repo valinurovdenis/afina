@@ -16,10 +16,12 @@
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <unistd.h>
+#include <functional>
 
 #include <afina/Storage.h>
 
 #include "../../protocol/Parser.h"
+#include "../../executor/Executor.cpp"
 #include <afina/execute/Command.h>
 
 namespace Afina {
@@ -174,7 +176,7 @@ void ServerImpl::RunAcceptor() {
         close(server_socket);
         throw std::runtime_error("Socket listen() failed");
     }
-
+    Afina::Executor ex("number 1", 10, 20, 60, 1000);
     int client_socket;
     struct sockaddr_in client_addr;
     socklen_t sinSize = sizeof(struct sockaddr_in);
@@ -193,12 +195,15 @@ void ServerImpl::RunAcceptor() {
             close(client_socket);
         else {
             std::pair<ServerImpl*, int> temp = std::make_pair(this, client_socket);
+            ex.Execute(&Afina::Network::Blocking::ServerImpl::RunConnection, this, client_socket);
+            /*
             pthread_t client_pthread;
             if (pthread_create(&client_pthread, NULL, ServerImpl::RunConnectionProxy, &temp) < 0) {
                 throw std::runtime_error("Could not create server thread");
             }
             connections.insert(client_pthread);
             pthread_detach(client_pthread);
+            */
         }
     }
 
