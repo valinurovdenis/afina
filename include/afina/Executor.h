@@ -59,6 +59,8 @@ public:
             }
 
             std::unique_lock<std::mutex> working_lock(this->working_mutex);
+            if (tasks.size() == max_queue_size)
+                return false;
             if (working_thread_cnt == threads.size() && working_thread_cnt + 1 <= hight_watermark)
                 add_thread();
             // Enqueue new task
@@ -95,7 +97,7 @@ private:
     /**
      * Vector of actual threads that perorm execution
      */
-    std::vector<std::pair<std::thread, std::thread::id>> threads;
+    std::vector<std::thread::id> threads;
     size_t working_thread_cnt = 0;
 
     /**

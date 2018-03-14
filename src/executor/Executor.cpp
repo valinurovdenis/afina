@@ -16,7 +16,7 @@ void perform(Executor *executor) {
                 if (executor->working_thread_cnt > executor->low_watermark){
                     executor->working_thread_cnt--;
                     for (size_t i = 0; i < executor->threads.size(); i++)
-                        if (executor->threads[i].second == std::this_thread::get_id()) {
+                        if (executor->threads[i] == std::this_thread::get_id()) {
                             executor->threads.erase(executor->threads.begin() + i);
                             break;
                         }
@@ -27,6 +27,7 @@ void perform(Executor *executor) {
             }
             if (executor->state == Executor::State::kStopped ||
                 (executor->state == Executor::State::kStopping && executor->tasks.empty())) {
+                executor->empty_condition.notify_all();
                 return;
             }
             {
@@ -37,8 +38,9 @@ void perform(Executor *executor) {
             task = executor->tasks.front();
             executor->tasks.pop_front();
         }
-        std::cout << "going to execute\n";
+
         task();
+
         {
             std::unique_lock<std::mutex> lock(executor->working_mutex);
             executor->working_thread_cnt--;
@@ -51,7 +53,8 @@ void Executor::add_thread(){
     std::unique_lock<std::mutex> lock(working_mutex);
     std::thread t(perform, this);
     auto id = t.get_id();
-    threads.emplace_back(std::make_pair(std::move(t), id));
+    t.detach();
+    threads.emplace_back(id);
 }
 
 Executor::Executor(std::string name, size_t _low_watermark, size_t _hight_watermark, size_t _max_queue_size, size_t _idle_time)
@@ -76,9 +79,9 @@ void Executor::Stop(bool await) {
 
     empty_condition.notify_all();
     if (await) {
-        for (size_t i = 0; i < threads.size(); i++) {
-            threads[i].first.join();
-        }
+        std::unique_lock<std::mutex> lock(tasks_mutex);
+        empty_condition.wait(lock, [this] { return !(tasks.empty() && state == Executor::State::kRun); });
+
         state = State::kStopped;
     }
 }
