@@ -3,6 +3,7 @@
 
 #include <memory>
 #include <pthread.h>
+#include <atomic>
 
 namespace Afina {
 
@@ -19,7 +20,8 @@ namespace NonBlocking {
  */
 class Worker {
 public:
-    Worker(std::shared_ptr<Afina::Storage> ps);
+    Worker(std::shared_ptr<Afina::Storage> ps): _running(false), Storage(ps) {}
+    Worker(const Worker &other);
     ~Worker();
 
     /**
@@ -47,10 +49,18 @@ protected:
     /**
      * Method executing by background thread
      */
-    void OnRun(void *args);
+    static void* OnRun(void *args);
+
+    void Run();
 
 private:
-    pthread_t thread;
+    std::atomic<bool> _running;
+
+    pthread_t _thread;
+
+    std::shared_ptr<Afina::Storage> Storage;
+
+    int server_sock;
 };
 
 } // namespace NonBlocking
