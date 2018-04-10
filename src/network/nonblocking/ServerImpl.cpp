@@ -60,6 +60,10 @@ void ServerImpl::Start(uint32_t port, uint16_t n_workers) {
         close(server_socket);
         throw std::runtime_error("Socket setsockopt() failed");
     }
+    if (setsockopt(server_socket, SOL_SOCKET, SO_REUSEPORT, &opts, sizeof(opts)) == -1) {
+        close(server_socket);
+        throw std::runtime_error("Socket setsockopt() failed");
+    }
 
     if (bind(server_socket, (struct sockaddr *)&server_addr, sizeof(server_addr)) == -1) {
         close(server_socket);

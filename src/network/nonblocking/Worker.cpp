@@ -19,18 +19,17 @@ namespace Afina {
 namespace Network {
 namespace NonBlocking {
 
-const size_t BUF_SIZE = 512;
+const ssize_t BUF_SIZE = 512;
 
 class Connection_info {
 public:
-    Connection_info() : is_parsed(false), is_building(false), readed_size(0) {
+    Connection_info() : is_parsed(false), is_building(false), readed("") {
         //		parser = Afina::Protocol::Parser();
     }
     std::string readed;
     Afina::Protocol::Parser parser;
     bool is_parsed, is_building;
     std::vector<std::string> results;
-    size_t readed_size;
     uint32_t body_size;
     std::unique_ptr<Execute::Command> command;
 };
@@ -116,7 +115,6 @@ void Worker::Run() {
                 struct sockaddr in_addr;
                 socklen_t in_len = sizeof(in_addr);
                 int infd = accept(server_sock, &in_addr, &in_len);
-                std::cout << infd << std::endl;
                 if (infd == -1)
                     if ((errno == EAGAIN) || (errno == EWOULDBLOCK))
                         break;
@@ -138,32 +136,32 @@ void Worker::Run() {
                 int fd = events[i].data.fd;
                 Connection_info *conn = &connections[fd];
 
-                if (events[i].events & EPOLLIN){
-                    std::cout << "get epollin\n";
+                if (events[i].events & (EPOLLIN | EPOLLOUT)){
+                    /* Read query */
+                    /* Sometimes get EPOLLOUT without getting EPOLLIN */
                     do {
-                        size_t size_buf = conn->readed_size;
-                        memcpy(buf, conn->readed.data(), (size_t)size_buf);
+                        size_t size_buf = conn->readed.size();
+                        memcpy(buf, conn->readed.data(), size_buf);
                         size_t parsed = 0;
-                        size_t count = 0;
+                        ssize_t count = 0;
 
                         if (!conn->is_parsed){
                             try {
-                                while (((count = read(fd, buf + size_buf, sizeof(buf) - size_buf)) > 0) && !conn->is_parsed) {
-                                    conn->is_parsed = conn->parser.Parse(buf, size_buf + (size_t)count, parsed);
+                                while (((count = read(fd, buf + size_buf, BUF_SIZE - size_buf)) > 0) && !conn->is_parsed) {
+                                    conn->is_parsed = conn->parser.Parse(buf, size_buf + count, parsed);
                                     size_buf += count - parsed;
-                                    memcpy(buf, buf + parsed, (size_t)size_buf);
+                                    memcpy(buf, buf + parsed, size_buf);
                                 }
 
                                 if (!conn->is_parsed){
+                                    parsed = 1;
                                     while (!conn->is_parsed && size_buf > 0 && parsed > 0) {
                                         conn->is_parsed = conn->parser.Parse(buf, size_buf, parsed);
                                         size_buf -= parsed;
                                         memcpy(buf, buf + parsed, size_buf);
                                     }
                                 }
-                                std::cout << "buf = " <<  buf << std::endl;
-                                conn->readed = buf;
-                                conn->readed_size = size_buf;
+                                conn->readed = std::string(buf, size_buf);
                             } catch (const std::runtime_error &error) {
                                 result = "ERROR\r\n";
                                 conn->results.push_back(result);
@@ -179,50 +177,45 @@ void Worker::Run() {
                         }
 
                         if (conn->is_building){
-                            size_t count_to_read = conn->body_size + 2 - conn->readed_size;
+                            ssize_t count_to_read = conn->body_size + 2 - conn->readed.size();
                             if ((conn->body_size != 0) && (count_to_read > 0)) {
                                 while ((count_to_read > 0) && ((count = read(fd, buf, std::min(count_to_read, BUF_SIZE))) > 0)) {
                                     conn->readed.append(buf, count);
-                                    conn->readed_size += count;
                                     count_to_read -= count;
                                 }
                             }
-                            std::cout << count_to_read << " " << conn->body_size << std::endl;
                             if ((count_to_read <= 0) || (conn->body_size == 0)) {
                                 std::string result;
                                 (*conn->command).Execute(*(Storage), conn->readed.substr(0, conn->body_size), result);
-                                conn->readed_size -= conn->body_size + 2;
-                                conn->readed.erase(0, conn->body_size + 2);
+                                if (conn->body_size != 0)
+                                    conn->readed.erase(0, conn->body_size + 2);
                                 result += "\r\n";
-                                std::cout << result << std::endl;
                                 conn->results.push_back(result);
                                 conn->parser.Reset();
                                 conn->is_building = false;
                                 conn->is_parsed = false;
                             }
                         }
-                    } while (conn->readed_size > 0);
+                    } while (conn->readed.size() > 0);
                 }
 
-                if (events[i].events & EPOLLOUT) {
-                    std::cout << "get epollout\n";
+                if (events[i].events & (EPOLLOUT)) {
+                    /* Answer to query */
                     for (std::string result: conn->results) {
-                        size_t count_write = 0;
-                        while (count_write < result.size()){
-                            std::cout << count_write << std::endl;
-                            result.erase(0, count_write);
-                            if ((count_write = write(events[i].data.fd, result.data(), result.size())) < 0) {
+                        size_t pos = 0, count_write;
+                        while (pos < result.size()){
+                            if ((count_write = write(events[i].data.fd, result.substr(pos).data(), result.size())) < 0) {
                                 if ((errno != EAGAIN) && (errno != EWOULDBLOCK)) {
                                     throw std::runtime_error("Socket send() failed");
                                 }
                             }
-                            std::cout << count_write << std::endl;
+                            pos += count_write;
                         }
                     }
                     conn->results.clear();
                 }
 
-                if ((conn->readed_size == 0) && conn->results.empty()){
+                if ((conn->readed.size() == 0) && conn->results.empty()){
                     close(fd);
                     connections.erase(fd);
                 }
