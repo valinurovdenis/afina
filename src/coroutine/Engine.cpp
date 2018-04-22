@@ -36,7 +36,7 @@ void Engine::Restore(context &ctx) {
 
 void Engine::yield() {
     context *next_routine = alive;
-    if (next_routine == cur_routine && next_routine != nullptr){
+    while (next_routine == cur_routine && next_routine != nullptr){
         next_routine = next_routine->next;
     }
 
